@@ -135,6 +135,7 @@ public class Main {
 && || !
 special ones
 &=, |=, ^=
+
 ### bit operators
 `~` reverse bit by bit
 `&` bit and
@@ -3032,3 +3033,1180 @@ methods
 5. `void notifyAll()`
 
 以下是一个典型例子，堆栈问题
+```java
+package Threads;
+
+public class Stack {
+    
+    private int pointer = 0;
+    // 感受一下这个pointer是怎么变化的
+
+    private char[] data = new char[5];
+
+    public synchronized void push(char c) {
+
+        while (pointer == data.length) {
+            try {
+                //等待，直到有数据出栈
+                this.wait();
+            } catch (InterruptedException e) { }
+
+        }
+        this.notify(); // 一开始写的时候忘记加上这句了，导致只压栈不出栈
+
+        data[pointer] = c;
+
+        pointer++;
+    }
+
+    public synchronized char pop() {
+
+        while (pointer == 0) {
+            // 注意这边要判断pointer是不是等于0
+            // 无数据不出栈
+            try {
+
+                this.wait();
+            } catch (InterruptedException e) {}
+        }
+
+        this.notify();
+        pointer--;
+        return data[pointer];
+    }
+}
+```
+调用如下
+```java
+package Threads;
+
+public class Test6 {
+    
+    public static void main(String[] args) {
+
+        Stack stack = new Stack();
+        // Two threads manipulate the same stack
+
+        Thread producer = new Thread(() -> {
+            char c;
+            for (int i = 0; i < 10; i++) {
+                c = (char) (Math.random() * 26 + 'A');
+                stack.push(c);
+                System.out.println("Produce "+ c);
+
+                try { 
+                    Thread.sleep((int) Math.random()*1000);
+                }
+                catch (InterruptedException e) {}
+            }
+        });
+
+        Thread consumer = new Thread(() -> {
+            char c;
+            for (int i = 0; i < 10; i++) {
+                c = stack.pop();
+
+                System.out.println("Consume " + c) ;
+
+                try {
+                    Thread.sleep((int) Math.random()*1000);
+                } catch (InterruptedException e) {}
+            }
+        });
+
+        producer.start();
+        consumer.start();
+    }
+}
+```
+
+---
+
+## 网络编程
+
+端口 port 相当于 ip的“分机”号码
+TCP/IP port: 16bit integer 0~63335
+port with number lower than 1024 are predifined port
+
+
+### **TCP Sockect低层次网络编程**
+
+Socket Class
+
+constructors:
+1. `Socket(InetAddress address, int port)` 指定远程主机ip和端口
+2. `Socket(InetAddress address, int port, InetAddress localAddr, int localPort)` 除了远程主机，还指定本地主机ip和端口
+3. `Socket(String host, int port)` 指定远程主机名和端口号，ip为null，即送回地址127.0.0.1
+4. `Socket(String host, int port, InetAddress localAddr, int localPort)`
+
+Other methods
+
+1. `InputStream getInputStream()` 通过此Socket返回输入流对象
+2. `OutputStream getOutputStream()` 输出流
+3. `int getPort()`
+4. `int getLocalPort()`
+5. `InetAddress getInetAddress()`
+6. `InetAddress getLocalAddress()`
+7. `boolean isClosed()`
+8. `boolean isConnected()`
+9. `void close()`
+
+Server Socket
+
+constructor:
+
+1. `serverSocket(int port, int maxQueue)` maxQueue 设置连接请求的最大队列长度，默认为50
+2. `serverSocket(int port` 连接请求的最大队列长度默认为50
+  
+other methods
+
+1. `InputStream getInputStream()`
+2. `OutputStream getOutputStream()`
+3. `boolean isClosed()`
+4. `Socket accept()` 此方法在建立链接之前一直阻塞，用于侦听并收到Socket的连接
+5. `void close()`
+
+close可以由资源自动管理技术完成
+
+*案例：文件上传工具*
+
+*UploadServer.java*
+```java
+package Web_Programming_TCP;
+
+import java.io.BufferedInputStream;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.net.ServerSocket;
+import java.net.Socket;
+
+public class UploadServer {
+    
+    public static void main(String[] args) {
+
+        System.out.println("Server online!");
+
+        try (ServerSocket server = new ServerSocket(8080);
+            // 8080 port
+            Socket socket = server.accept();
+            // 当前线程阻塞，等待客户端响应
+            // 事实上，阻塞主线程并不太好，因为如果在图形界面中，会导致画面卡住，界面操作失效
+            // 最好能把这种语句放到子线程中（如何更改呢？）
+            BufferedInputStream in = new BufferedInputStream(socket.getInputStream());
+
+            FileOutputStream out = new FileOutputStream("./TestDir/subDir/Test.png")
+            )
+        {
+            byte[] buffer = new byte[1024];
+
+            int len = in.read(buffer);
+
+            while (len != -1) {
+
+                out.write(buffer, 0, len);
+                
+                len = in.read(buffer);
+            }
+
+            System.out.println("RECEIVED");
+            
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+    }
+
+
+}
+
+```
+
+*UploadClient.java*
+
+```java
+package Web_Programming_TCP;
+
+import java.io.BufferedInputStream;
+import java.io.BufferedOutputStream;
+import java.io.FileInputStream;
+import java.io.IOException;
+import java.net.ConnectException;
+import java.net.Socket;
+
+public class UploadClient {
+    
+    public static void main(String[] args) {
+
+        System.out.println("Clinet online!");
+        
+        try (//向8080发出请求
+                Socket socket = new Socket("127.0.0.1", 8080);
+                
+                // 由socket获取输出流
+
+                BufferedOutputStream out = new BufferedOutputStream(socket.getOutputStream());
+
+                FileInputStream fin = new FileInputStream("./TestDir/Test.png");
+
+                BufferedInputStream in = new BufferedInputStream(fin)
+        )
+        {
+            byte[] buffer = new byte[1024];
+
+            int len = in.read(buffer);
+
+            while (len != -1) {
+                out.write(buffer, 0, len);
+
+                len = in.read(buffer);
+            }
+
+            System.out.println("Upload Successful");
+            
+        } catch (ConnectException e) {
+            // TODO: handle exception
+            System.out.println("Server Offline");
+        }
+        catch (IOException e) {
+            e.printStackTrace();
+        }
+    }
+}
+
+```
+
+需要在两个不同的**terminal**中分别运行服务器和客户端
+注意要先运行服务器端
+
+*案例：聊天工具*
+
+可以实现双向传播
+但是服务器端和客户端不能连续发消息，会有一定的问题
+
+```java
+package Web_Programming_TCP;
+
+import java.io.BufferedReader;
+import java.io.DataInputStream;
+import java.io.DataOutputStream;
+import java.io.InputStreamReader;
+import java.net.ServerSocket;
+import java.net.Socket;
+import java.time.LocalTime;
+
+public class ChatServer {
+    
+    public static void main(String[] args) {
+
+        System.out.println("Server Online!");
+
+        Thread t = new Thread(() -> {
+
+            try (
+                ServerSocket server = new ServerSocket(8080);
+
+                Socket socket = server.accept(); // 在子线程中，阻塞，等待客户端请求
+
+                DataInputStream in = new DataInputStream(socket.getInputStream());
+
+                DataOutputStream out = new DataOutputStream(socket.getOutputStream());
+
+                BufferedReader keyboardIn = new BufferedReader(new InputStreamReader(System.in)) // 用标准输出流创建缓冲输出流
+            )
+            {
+                while (true) {
+                    /*receive message */
+                    String str = in.readUTF();
+
+                    System.out.printf(LocalTime.now() + " Clinet: %s %n", str);
+                    
+                    /*send message */
+                    String keyboardInputString = keyboardIn.readLine();
+
+                    if (keyboardInputString.equalsIgnoreCase("bye")) {
+                        break;
+                    }
+
+                    out.writeUTF(keyboardInputString);
+                    
+                    out.flush();
+                }
+                
+            } catch (Exception e) {
+                // TODO: handle exception
+            }
+            System.out.println("Server shut down!");
+        });
+
+        t.start();
+
+    }
+}
+
+```
+
+```java
+package Web_Programming_TCP;
+
+import java.io.BufferedReader;
+import java.io.DataInputStream;
+import java.io.DataOutputStream;
+import java.io.InputStreamReader;
+import java.net.ConnectException;
+import java.net.Socket;
+import java.time.LocalTime;
+
+public class ChatClient {
+    
+    public static void main(String[] args) {
+         
+        System.out.println("Client online!");
+
+        Thread t = new Thread(() -> {
+
+            try ( // 向127.0.0.1主机8080端口发出请求
+                Socket socket = new Socket("127.0.0.1", 8080, null, 0);
+
+                DataInputStream in = new DataInputStream(socket.getInputStream());
+
+                DataOutputStream out = new DataOutputStream(socket.getOutputStream());
+
+                BufferedReader keyboardIn = new BufferedReader(new InputStreamReader(System.in))
+            ){
+                while (true) {
+
+                    /*send message */
+                    String keyboardInputString = keyboardIn.readLine(); // 标准输入
+
+                    if (keyboardInputString.equalsIgnoreCase("bye")) {
+                        break;
+                    }
+
+                    out.writeUTF(keyboardInputString);
+                    
+                    out.flush();
+
+                    /*receive message */
+                    String str = in.readUTF();
+
+                    System.out.printf(LocalTime.now() + " Server: %s %n", str);
+                    
+                }
+                
+            } catch (ConnectException e) {
+                System.out.println("Server offline!");
+                for (int i = 5; i >= 0; i--) {
+                    System.out.print(".");
+                    try {
+                        Thread.sleep(1000);
+                    } catch (InterruptedException e1) {
+                    }
+                }
+            } 
+            catch (Exception e) {
+            }
+            System.out.println("Client shut down!");
+        });
+
+        t.start();
+                
+
+    }
+}
+
+```
+
+### **UDP Sockect低层次网络编程**
+
+无连接，对系统资源要求少，可能会有丢包，不保证数据顺序
+
+但是传输快，实时性高
+
+DatagramSocket类 和 DatagramPacket类
+
+DatagramSocket类constructor
+1. `DatagramSocket()`创建数据报对象，并将其绑定到本地主机上的任何可用端口
+2. `DatagramSocket(int port)`创建数据报对象，并将其绑定到指定端口
+3. `DatagramSocket(int port, InetAddress laddr)`
+  
+other method:
+1. `void send(DatagramPacket p)`
+2. `void receive(DatagramPacket p)`
+3. `int getPort()`
+4. `int getLocalPort()`
+5. `InetAddress getInetAddress()` 返回DatagramSocket连接的地址
+6. `InetAddress getLocalAddress()` 返回绑定的本地地址
+7. `boolean isClosed()`
+8. `boolean isConnected()`
+9. `void isClosed()`
+
+DatagramPacket类constructor
+1. `DatagramPacket(byte[] buf, int length)` buf 是数据包，length是包长度
+2. `DatagramPacket(byte[] buf, int length, InetAddress address, int port)`
+3. `DatagramPacket(byte[] buf, int offset, int length)`
+4. `DatagramPacket(byte[] buf, int offset, int length, InetAddress address, int port)`
+   
+useful methods
+1. `InetAddress getAddress()`
+2. `byte[] getData()`
+3. `int getLength()` 返回发送或接受到的数据byte[]的长度
+4. `int getOffset()`
+5. `int getPort()`
+
+重新实现一下上文中的文件传输器
+```java
+
+package Web_Programming_UDP;
+
+import java.io.BufferedOutputStream;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.net.DatagramPacket;
+import java.net.DatagramSocket;
+
+public class UploadServer {
+    public static void main(String[] args) {
+
+        System.out.println("Server Online!");
+
+        Thread t = new Thread(()->{
+
+            try (DatagramSocket socket = new DatagramSocket(8080);
+                FileOutputStream fout = new FileOutputStream("./TestDir/subDir/Test.png"); // 注意路径不要写错
+                BufferedOutputStream out = new BufferedOutputStream(fout);
+            ){
+                
+                byte[] buffer = new byte[1024]; // create buffer zone 
+
+                while (true) {
+                    DatagramPacket packet = new DatagramPacket(buffer, buffer.length);
+
+                    socket.receive(packet); // 该方法会导致线程阻塞，所以放在子线程里比较好
+
+                    int len = packet.getLength();
+
+                    if (len == 3) {
+
+                        String flag = new String(buffer, 0 , 3);
+
+                        if (flag.equals("bye")) {
+                            break;
+                        }
+                    }
+
+                    out.write(buffer,0,len);
+
+                }
+                System.out.println("received!");
+            } catch (IOException e) {
+                // TODO: handle exception
+                e.printStackTrace();
+            }
+        });
+
+        t.start();
+    }
+}
+
+```
+
+```java
+package Web_Programming_UDP;
+
+import java.io.BufferedInputStream;
+import java.io.FileInputStream;
+import java.net.DatagramPacket;
+import java.net.DatagramSocket;
+import java.net.InetAddress;
+
+public class UploadClient {
+    public static void main(String[] args) {
+
+        System.out.println("Client Online!"); 
+
+        try (DatagramSocket socket = new DatagramSocket();
+            FileInputStream fin = new FileInputStream("./TestDir/Test.png");
+            BufferedInputStream in = new BufferedInputStream(fin); 
+        ){
+            InetAddress address = InetAddress.getByName("localhost");
+
+            byte[] buffer = new byte[1024];
+
+            int len = in.read(buffer);
+
+            while (len != -1) {
+
+                DatagramPacket packet = new DatagramPacket(buffer, len, address, 8080);
+
+                socket.send(packet);
+
+                len = in.read(buffer);
+            }
+
+            DatagramPacket packet = new DatagramPacket("bye".getBytes(), 3, address, 8080); // 结束标志
+
+            socket.send(packet);
+
+            System.out.println("Upload complete!");
+            
+        } catch (Exception e) {
+            // TODO: handle exception
+            e.printStackTrace();
+        }
+    }
+}
+
+```
+
+### **数据交换格式、JSON和XML**
+
+json是一种轻量级数据交换格式
+json文档的两种结构为对象和数组，对象是“名称-值”对的集合，数组就是一系列元素的集合
+
+```json
+{
+  "name":"a.htm",
+  "size":345,
+  "saved":true
+}
+```
+
+```json
+["text","css","html"]
+```
+
+因为技术原因，json部分无法调试代码和安装org.json 包 暂时跳过
+
+### **访问互联网资源 URL**
+
+URL的格式
+> protocol://resources
+
+使用URL类
+
+constructors
+1. `URL(String spec)`
+2. `URL(String protocol, String host, String file)`
+3. `URL(String protocol, String host, int port, String file)`
+
+常用方法
+1. `inputStream openStream()` 打开链接，返回输入流
+2. `URLConnection openConnection()`
+
+```java
+package Web_Programming_URL;
+
+import java.io.BufferedReader;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.net.MalformedURLException;
+import java.net.URL;
+
+public class Test1 {
+    
+    public static void main(String[] args) {
+        String url = "https://sina.com.cn/";
+
+        URL reqURL;
+        try {
+            reqURL = new URL(url);
+        } catch (MalformedURLException e) {
+            return;
+        }
+        try (//打开网络通信流
+            InputStream is = reqURL.openStream(); 
+            InputStreamReader isr = new InputStreamReader(is, "utf-8");
+            BufferedReader br = new BufferedReader(isr);
+        ){
+            StringBuilder sb = new StringBuilder();
+            String line = br.readLine();
+
+            while (line != null) {
+                sb.append(line);
+                sb.append("\n");
+                line = br.readLine();
+            }
+
+            System.out.println(sb);
+            
+        } catch (IOException e) {
+            // TODO: handle exception
+        }
+    }
+}
+```
+这样就可以“爬取” sina的网页内容了
+
+**使用HttpURLConnection发送GET/POST请求**
+
+```java
+
+URL reqURL = new URL(urlString);
+conn = (HttpURLConnection) reqURL.openConnection();
+conn.setRequestMethod("POST");
+
+```
+
+案例：downloader
+```java
+package Web_Programming_URL;
+
+import java.io.BufferedInputStream;
+import java.io.BufferedOutputStream;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
+
+
+public class Downloader {
+    private static String urlString = "https//ss0.bdstatic.com/5aV1bjqh_Q23odCf/"+"static/superman/img/logo/bd_;ogo1_31bdc765.png";
+
+    public static void main(String[] args) {
+        download();
+    }
+
+    private static void download(){
+        HttpURLConnection conn = null;
+
+        try {
+            URL reqURL = new URL(urlString);
+
+            conn = (HttpURLConnection) reqURL.openConnection();
+
+            try ( InputStream is = conn.getInputStream();
+                BufferedInputStream bin = new BufferedInputStream(is);
+                OutputStream os = new FileOutputStream("./download.png");
+                BufferedOutputStream bout = new BufferedOutputStream(os);
+            ){
+                byte[] buffer = new byte[1024];
+
+                int byteRead = bin.read(buffer);
+
+                while (byteRead != -1) {
+                    bout.write(buffer,0,byteRead);
+                    byteRead = bin.read(buffer);
+                }
+                
+            } catch (IOException e){}
+            System.out.println("Download complete!");
+        } catch (IOException e) {
+            // TODO: handle exception
+        } finally {
+            if (conn != null) {
+                conn.disconnect();
+            }
+        }
+
+    }
+}
+```
+---
+
+## Swing 图形界面编程
+
+### Swing basis
+
+```java
+package GUI;
+
+import java.awt.Container;
+
+import javax.swing.JFrame;
+import javax.swing.JLabel;
+
+public class SwingDemo1 {
+    
+    public static void main(String[] args) {
+        
+        JFrame frame = new JFrame("MyFrame", null);
+
+        JLabel label1 = new JLabel("Hello Swing!");
+
+        Container contentpane = frame.getContentPane();
+
+        contentpane.add(label1);
+
+        frame.setSize(300, 300); // 最后设置大小，设置可见
+
+        frame.setVisible(true);
+    }
+}
+```
+
+> 也可以写一个JFrame的子类，在构造方法中初始化窗口
+>
+
+### **事件处理模型**
+
+事件，事件源和事件处理者
+
+事件是用户对界面的操作
+
+事件源是事件发生的场所
+
+事件处理者是事件处理程序
+
+| 事件类型 | 监听接口 | 监听方法 |
+| ------- | -------- | ------- |
+| Action | ActionListener | `actionPerformed()` |
+| Item | ItemListener | `itemStateChanged()` |
+| Mouse| MouseListener | `mousePressed()` ... |
+...
+
+可以用内部类/匿名内部类 lambda表达式实现事件处理
+
+```java
+package GUI;
+
+import java.awt.BorderLayout;
+import java.awt.event.ActionEvent;
+import java.awt.event.ActionListener;
+
+import javax.swing.JButton;
+import javax.swing.JFrame;
+import javax.swing.JLabel;
+
+public class FrameEffect extends JFrame{
+    
+    JLabel label1;
+    
+    public FrameEffect(String title) {
+
+        super(title);
+
+        label1 = new JLabel("Label");
+
+        getContentPane().add(label1, BorderLayout.NORTH); // 布局，枚举变量
+
+        JButton button1 = new JButton("Button1");
+
+        getContentPane().add(button1, BorderLayout.CENTER);
+
+        JButton button2 = new JButton("Button2");
+
+        getContentPane().add(button2, BorderLayout.SOUTH);
+
+        setSize(350, 120);
+
+        setVisible(true);
+
+        button2.addActionListener(new ActionEventHandler());
+
+        button1.addActionListener(new ActionListener() {
+            
+            @Override
+            public void actionPerformed(ActionEvent event) {
+                label1.setText("Hello Swing!");
+            }
+        });
+    }
+
+    class ActionEventHandler implements ActionListener {
+
+        @Override
+        public void actionPerformed(ActionEvent e) {
+            label1.setText("Hello World!");
+        }
+    }
+    
+}
+```
+也可以用Lambda表达式，只需要修改注册事件监听器的代码
+
+```java
+button1.addActionListener((event) -> {
+    label1.setText("Hello Swing");
+});
+```
+```java
+package GUI;
+
+import java.awt.BorderLayout;
+import java.awt.event.ActionEvent;
+import java.awt.event.ActionListener;
+
+import javax.swing.JButton;
+import javax.swing.JFrame;
+import javax.swing.JLabel;
+
+public class FrameEffect2 extends JFrame implements ActionListener{
+    
+    JLabel label1;
+    
+    public FrameEffect2(String title) {
+
+        super(title);
+
+        label1 = new JLabel("Label");
+
+        getContentPane().add(label1, BorderLayout.NORTH); // 布局，枚举变量
+
+        JButton button1 = new JButton("Button1");
+
+        getContentPane().add(button1, BorderLayout.CENTER);
+
+        JButton button2 = new JButton("Button2");
+
+        getContentPane().add(button2, BorderLayout.SOUTH);
+
+        setSize(350, 120);
+
+        setVisible(true);
+
+        button2.addActionListener(this);  // 由于本类调用了ActionListener的接口，这里就是this就可以
+
+        button1.addActionListener((event) -> {
+            label1.setText("Hello World");
+        });
+
+    }
+    @Override
+    public void actionPerformed(ActionEvent e) {
+        label1.setText("Hello Swing!");
+    }    
+    // 覆写actionlistener的抽象方法
+}
+
+```
+
+如果一个事件监听器接口只有一个抽象方法，则可以使用lambda表达式
+
+**适配器使用**
+
+监听器是接口，适配器是类
+
+只覆盖需要实现的方法，其他方法则不用实现
+
+```java
+this.addWindowListener(new WindowAdapter() {
+
+    @override
+    public void windowClosing(WindowEvent e) {
+        System.exit(0);
+    }
+})
+```
+
+### **布局管理**
+
+`setLayout()`
+
+#### **FlowLayout布局**
+
+主要构造方法
+`FlowLayout(int align, int hgap, int vgap)`
+
+align 是对齐方式，是通过FlowLayout常量指定的
+
+CENTER
+LEADING
+LEFT
+RIGHT
+TRAILING 结束边对齐
+
+#### **BorderLayout布局**
+
+把容器分为5个区域
+
+主要构造方法
+`BorderLayout(int hgap, int vgap)`
+
+向面版容器添加元素的时候用add(), 需要指定约束常量
+
+CENTER
+EAST
+NORTH
+SOUTH
+WEST
+
+#### **GridLayout布局**
+
+该布局以网络形式对组件进行摆放
+
+主要构造方法
+`GridLayout(int rows, int cols, int hgap, int vgap)`
+
+添加元素的时候，从左到右，从上到下
+
+#### **不使用布局管理器**
+`setLayout(null);`
+
+`setLocation(int x, int y)`
+`setSize(int width, int height)`
+`setBounds(int x, int y, int width, int height)` 设置大小和位置
+
+以下是一个示例
+```java
+package GUI;
+
+import javax.swing.JButton;
+import javax.swing.JFrame;
+import javax.swing.JLabel;
+import javax.swing.SwingConstants;
+
+public class Layout extends JFrame {
+    
+    public Layout(String title) {
+        
+        super(title);
+
+        setResizable(false);
+
+        getContentPane().setLayout(null);
+
+        JLabel label = new JLabel("label");
+
+        label.setBounds(89, 13, 100, 30);
+
+        label.setHorizontalAlignment(SwingConstants.CENTER); // 标签文本水平居中
+
+        getContentPane().add(label);
+
+        JButton button1 = new JButton("Button1", null);
+
+        button1.setBounds(89, 59, 100, 30);
+
+        getContentPane().add(button1);
+
+        JButton button2 = new JButton("Button2", null);
+
+        button2.setLocation(89, 102);
+
+        button2.setSize(100, 30);
+
+        getContentPane().add(button2);
+
+        setSize(300,200);
+
+        setVisible(true);
+
+        button2.addActionListener((event) -> {
+            label.setText("Hello Swing");
+        });
+
+        button1.addActionListener((event) -> {
+            label.setText("Hello World");
+        });
+    }
+}
+
+// 为什么本例中完全不需要调用ActionListener的接口，也不需要覆盖ActionListener的方法?
+```
+
+### **Swing组件**
+
+#### **标签和按钮**
+
+1. `JLabel(String text, Icon icon, int horizontalAlignment)`
+   1. icon可以设置图标
+   2. 水平对齐方式选用SwingContraints中定义的LEFT/CENTER/RIGHT/LEADING/TRAILING
+2. `Jbutton(String text, Icon icon)`
+
+> icon image 有 ImageIcon 类
+
+#### **文本输入组件**
+JTextField JPasswordField JTextArea
+
+前两个单行文本，后一个可以输入和显示多列文本
+
+enter时触发ActionEvent事件
+
+`JTextField(String text, int columns)`
+
+`JTextArea(String text, int rows, int columns)`
+
+以下是一个示例
+
+```java
+package GUI;
+
+import java.awt.BorderLayout;
+
+import javax.swing.JFrame;
+import javax.swing.JLabel;
+import javax.swing.JPanel;
+import javax.swing.JPasswordField;
+import javax.swing.JTextArea;
+import javax.swing.JTextField;
+
+public class TextArea extends JFrame{
+    private JTextField textField;
+    private JPasswordField passwordField;
+
+    public TextArea(String title) {
+        super(title);
+
+        getContentPane().setLayout(new BorderLayout());
+
+        JPanel panel1 = new JPanel(); // 创建面板，方便布局嵌套
+
+        getContentPane().add(panel1, BorderLayout.NORTH);
+
+        JLabel lbTextFieldLabel = new JLabel("TextField:");
+
+        panel1.add(lbTextFieldLabel);
+
+        textField = new JTextField(12);
+
+        panel1.add(textField);
+
+        JLabel lbPasswordLabel = new JLabel("Password:");
+
+        panel1.add(lbPasswordLabel);
+
+        passwordField = new JPasswordField(12); //?
+
+        panel1.add(passwordField);
+
+        JPanel panel2 = new JPanel();
+
+        getContentPane().add(panel2, BorderLayout.SOUTH); // 嵌套式布局
+
+        JLabel lblTextAreLabel = new JLabel("TextArea:");
+
+        panel2.add(lblTextAreLabel);
+
+        JTextArea textArea = new JTextArea(3, 20);
+
+        panel2.add(textArea);
+
+        pack();
+        // 紧凑排列
+
+        setVisible(true);
+
+        textField.addActionListener((event)-> {
+            textArea.setText("enter pressed");
+        });
+
+    }
+    
+}
+
+```
+
+#### **复选框和单选按钮**
+
+JCheckBox 和 JRadioButton
+
+`JCheckBox(String text, Icon icon, boolean selected)`
+
+JRadioButton的构造方式是类似的
+
+RadioButton需要创建ButtonGroup以实现互斥选项
+
+以下是一个实现例
+```java
+package GUI;
+
+import javax.swing.ButtonGroup;
+import javax.swing.JCheckBox;
+import javax.swing.JFrame;
+import javax.swing.JLabel;
+import javax.swing.JPanel;
+import javax.swing.JRadioButton;
+
+import java.awt.BorderLayout;
+import java.awt.Button;
+import java.awt.FlowLayout;
+import java.awt.event.ItemEvent;
+import java.awt.event.ItemListener;
+
+public class Boxes extends JFrame implements ItemListener {
+    private JRadioButton radioButton1 = new JRadioButton("Male");
+    private JRadioButton radioButton2 = new JRadioButton("Female");
+    private JRadioButton radioButton3 = new JRadioButton("Non-Binary");
+
+    public Boxes(String title) {
+
+        super(title);
+
+        getContentPane().setLayout(new BorderLayout());
+
+        JPanel panel1 = new JPanel();
+        FlowLayout flowLayout_1 = (FlowLayout) panel1.getLayout();
+        flowLayout_1.setAlignment(FlowLayout.LEFT);
+
+        getContentPane().add(panel1);
+
+        JLabel label1 = new JLabel("choose your favourite programming language");
+        panel1.add(label1);
+
+        JCheckBox checkBox1 = new JCheckBox("Java");
+        panel1.add(checkBox1);
+
+        JCheckBox checkBox2 = new JCheckBox("C++");
+        panel1.add(checkBox2);
+
+        JCheckBox checkBox3 = new JCheckBox("Python");
+
+        checkBox3.addActionListener((event) -> {
+            System.out.println(checkBox3.isSelected());
+        });
+
+        panel1.add(checkBox3);
+
+        JPanel panel2 = new JPanel();
+        FlowLayout flowLayout = (FlowLayout) panel2.getLayout();
+        flowLayout.setAlignment(FlowLayout.LEFT);
+        getContentPane().add(panel2, BorderLayout.SOUTH);
+
+        JLabel label2 = new JLabel("choose your gender");
+
+        panel2.add(label2);
+
+        ButtonGroup buttonGroup = new ButtonGroup();
+        panel2.add(radioButton1);
+        panel2.add(radioButton2);
+        panel2.add(radioButton3);
+        
+        buttonGroup.add(radioButton1);
+        buttonGroup.add(radioButton2);
+        buttonGroup.add(radioButton3);
+
+        radioButton1.addItemListener(this);
+        radioButton2.addItemListener(this);
+        radioButton3.addItemListener(this);
+
+        pack();
+
+        setVisible(true);
+    }
+
+    @Override
+    public void itemStateChanged(ItemEvent e) {
+        if (e.getStateChange() == ItemEvent.SELECTED) {
+            JRadioButton button = (JRadioButton) e.getItem();
+            System.out.println(button.getName());
+        }
+    }
+}
+
+```
+
+#### **下拉列表**
+
+`JComboBox(Object[] items)`
+
+#### **列表**
+
+`JList(Object[] listData)`
+
+#### **分隔面板**
+
+`JSplitPane(int newOrientation, Component newLeftComponent, Component newRightComponent)`
+
+newOrientation can take: `JSplitPane.HORIZONTAL_SPLIT` & `JSplitPane.VERTICAL_SPLIT`
+
+#### **表格**
+
+`JTable(TableModel dm)`
+
+`JTable(Object[][] rowData, Object[][] columnData)`
+
+`JTable(int row, int col)`
+
+以上部分仅作了解
